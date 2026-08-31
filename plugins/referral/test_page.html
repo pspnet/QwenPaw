@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Referral Plugin</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/antd@4/dist/antd.min.css">
+<script crossorigin src="https://unpkg.com/antd@4/dist/antd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f0f2f5; min-height: 100vh; }
+  #root { max-width: 1000px; margin: 0 auto; padding: 24px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function() {
+  var R = React, a = antd;
+  var e = R.createElement;
+  var useState = R.useState, useEffect = R.useEffect, useCallback = R.useCallback, useMemo = R.useMemo;
+
+  function apiGet(path) {
+    return fetch("/api/referral" + path).then(function(r) {
+      if (!r.ok) throw new Error(r.status); return r.json();
+    });
+  }
+
+  function ReferralPage() {
+    var _m = useState(null), member = _m[0], setMember = _m[1];
+    var _ml = useState(false), memberLoading = _ml[0], setMemberLoading = _ml[1];
+    var _rec = useState([]), records = _rec[0], setRecords = _rec[1];
+    var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+    var _tot = useState(0), total = _tot[0], setTotal = _tot[1];
+    var _pg = useState(1), page = _pg[0], setPage = _pg[1];
+    var _sz = useState(20), pageSize = _sz[0], setPageSize = _sz[1];
+    var _rw = useState({ total_referrals: 0, total_rewards: 0 }), rewards = _rw[0], setRewards = _rw[1];
+    var _rl = useState(false), rewardsLoading = _rl[0], setRewardsLoading = _rl[1];
+
+    var loadMember = useCallback(function() {
+      setMemberLoading(true);
+      apiGet("/me").then(function(d) { setMember(d.member || null); })
+        .catch(function() { a.message.error("加载会员信息失败"); })
+        .finally(function() { setMemberLoading(false); });
+    }, []);
+
+    var loadRecords = useCallback(function() {
+      setLoading(true);
+      apiGet("/records?page=" + page + "&size=" + pageSize).then(function(d) {
+        setRecords(d.items || []); setTotal(d.total || 0);
+      }).catch(function() { a.message.error("加载邀请记录失败"); })
+        .finally(function() { setLoading(false); });
+    }, [page, pageSize]);
+
+    var loadRewards = useCallback(function() {
+      setRewardsLoading(true);
+      apiGet("/rewards").then(function(d) {
+        setRewards({ total_referrals: d.total_referrals || 0, total_rewards: d.total_rewards || 0 });
+      }).catch(function(){}).finally(function() { setRewardsLoading(false); });
+    }, []);
+
+    useEffect(function() { loadMember(); loadRewards(); }, [loadMember, loadRewards]);
+    useEffect(function() { loadRecords(); }, [loadRecords]);
+    function refreshAll() { loadMember(); loadRewards(); loadRecords(); }
+
+    var invitationLink = useMemo(function() {
+      if (!member || !member.referral_code) return "";
+      return window.location.origin + "/invite?code=" + member.referral_code;
+    }, [member]);
+
+    function formatDateTime(v) {
+      if (!v) return "";
+      var d = new Date(v);
+      return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour12: false });
+    }
+
+    var columns = [
+      { title: "序号", width: 64, align: "center",
+        render: function(_, __, i) { return e(a.Typography.Text, { type: "secondary" }, String((page-1)*pageSize+i+1)); } },
+      { title: "被邀请人 ID", dataIndex: "referee_member_id",
+        render: function(v) { return e(a.Typography.Text, { code: true }, v.substring(0,16) + "..."); } },
+      { title: "我的奖励", dataIndex: "referrer_points", width: 120,
+        sorter: function(x, y) { return x.referrer_points - y.referrer_points; },
+        render: function(v) { return e(a.Typography.Text, { strong: true, style: { color: "#52c41a" } }, "+" + v); } },
+      { title: "对方奖励", dataIndex: "referee_points", width: 120,
+        render: function(v) { return e(a.Typography.Text, { style: { color: "#1677ff" } }, "+" + v); } },
+      { title: "状态", dataIndex: "status", width: 100,
+        render: function(v) { return e(a.Tag, { color: v === "completed" ? "success" : "processing" }, v === "completed" ? "已完成" : v); } },
+      { title: "接受时间", dataIndex: "created_at", width: 180, render: formatDateTime }
+    ];
+
+    return e("div", null,
+      // ━━━ Top Card ━━━
+      e(a.Card, { loading: memberLoading, style: { marginBottom: 24 }, bodyStyle: { padding: 24 } },
+        member ? e("div", null,
+          // Stats at top
+          e(a.Row, { gutter: 0, style: { marginBottom: 24 } },
+            e(a.Col, { span: 12, style: { textAlign: "center" } },
+              e(a.Statistic, { title: "已邀请", value: rewards.total_referrals, loading: rewardsLoading, valueStyle: { fontSize: 28 }, suffix: "人" })
+            ),
+            e(a.Col, { span: 12, style: { textAlign: "center", borderLeft: "1px solid #f0f0f0" } },
+              e(a.Statistic, { title: "累计奖励", value: rewards.total_rewards, loading: rewardsLoading, valueStyle: { fontSize: 28, color: "#52c41a" }, suffix: "积分" })
+            )
+          ),
+          // Divider
+          e("div", { style: { borderTop: "1px solid #f0f0f0", marginBottom: 20 } }),
+          // Invitation link + code (same row)
+          e(a.Row, { gutter: 24 },
+            e(a.Col, { span: 12 },
+              e(a.Typography.Text, { type: "secondary", style: { fontSize: 12, display: "block", marginBottom: 4 } }, "邀请链接"),
+              e(a.Typography.Paragraph, {
+                copyable: { text: invitationLink },
+                style: { marginBottom: 0, fontSize: 14, color: "#595959", wordBreak: "break-all" }
+              }, invitationLink || "—")
+            ),
+            e(a.Col, { span: 12 },
+              e(a.Typography.Text, { type: "secondary", style: { fontSize: 12, display: "block", marginBottom: 4 } }, "邀请码"),
+              e(a.Typography.Paragraph, {
+                copyable: { text: member.referral_code },
+                style: { marginBottom: 0, fontSize: 14, color: "#595959", fontFamily: "monospace", letterSpacing: 2 }
+              }, member.referral_code || "—")
+            )
+          )
+        ) : null
+      ),
+
+      // ━━━ Records Table ━━━
+      e(a.Card, {
+        title: "邀请记录",
+        extra: e(a.Button, { size: "small", onClick: refreshAll }, "刷新"),
+        bodyStyle: { padding: 0 }
+      },
+        e(a.Table, {
+          dataSource: records, columns: columns, rowKey: "id", loading: loading, size: "middle",
+          pagination: {
+            current: page, pageSize: pageSize, total: total,
+            showSizeChanger: true, pageSizeOptions: ["10", "20", "50"],
+            showTotal: function(t) { return "共 " + t + " 条"; },
+            onChange: function(p, s) { setPage(p); setPageSize(s); }
+          }
+        })
+      )
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById("root")).render(e(ReferralPage));
+})();
+</script>
+</body>
+</html>

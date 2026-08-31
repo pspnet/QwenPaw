@@ -1,0 +1,26 @@
+{
+  "id": "feedback",
+  "name": "Feedback",
+  "version": "1.0.0",
+  "description": "用户问题反馈插件，支持提交反馈和查看历史记录",
+  "description_i18n": {
+    "zh-CN": "用户问题反馈插件，支持提交反馈和查看历史记录",
+    "en-US": "User feedback plugin with submission form and history"
+  },
+  "author": "QwenPaw User",
+  "type": "general",
+  "entry": {
+    "backend": "backend/plugin.py",
+    "frontend": "dist/index.js"
+  },
+  "dependencies": [
+    "httpx>=0.27.0",
+    "fastapi>=0.110",
+    "pydantic>=2.0"
+  ],
+  "qwenpaw_version": {
+    "min": "1.0.0",
+    "max": "2.1.0"
+  },
+  "meta": {}
+}

@@ -1,0 +1,23 @@
+{
+  "id": "memory-sync-reporter",
+  "name": "Memory Sync Reporter",
+  "version": "1.0.0",
+  "description": "Periodically sync memory files (PROFILE.md, MEMORY.md) to remote service",
+  "description_i18n": {
+    "zh-CN": "定时将记忆文件（PROFILE.md、MEMORY.md）同步到远程服务",
+    "en-US": "Periodically sync memory files (PROFILE.md, MEMORY.md) to remote service"
+  },
+  "author": "QwenPaw User",
+  "type": "general",
+  "entry": {
+    "backend": "backend/plugin.py"
+  },
+  "dependencies": [
+    "httpx>=0.27.0"
+  ],
+  "qwenpaw_version": {
+    "min": "1.0.0",
+    "max": "2.1.0"
+  },
+  "meta": {}
+}

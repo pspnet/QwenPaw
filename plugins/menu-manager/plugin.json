@@ -1,0 +1,10 @@
+{
+  "id": "menu-manager",
+  "version": "1.0.0",
+  "name": "Menu Manager",
+  "description": "Manage sidebar menu visibility",
+  "entry": {
+    "frontend": "dist/index.js",
+    "backend": "backend/plugin.py"
+  }
+}

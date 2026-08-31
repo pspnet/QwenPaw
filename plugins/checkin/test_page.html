@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checkin Plugin</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/antd@4/dist/antd.min.css">
+<script crossorigin src="https://unpkg.com/antd@4/dist/antd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f0f2f5; min-height: 100vh; }
+  #root { max-width: 800px; margin: 0 auto; padding: 24px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function() {
+  var R = React, a = antd;
+  var e = R.createElement;
+  var useState = R.useState, useEffect = R.useEffect, useCallback = R.useCallback;
+
+  var API = "/api/checkin";
+
+  function checkToday() {
+    return fetch(API + "/today").then(function(r) {
+      if (!r.ok) throw new Error("check today failed");
+      return r.json();
+    });
+  }
+
+  function doCheckin() {
+    return fetch(API + "/today", { method: "POST" }).then(function(r) {
+      if (!r.ok) throw new Error("checkin failed");
+      return r.json();
+    });
+  }
+
+  function fetchHistory(page, size) {
+    return fetch(API + "/history?page=" + page + "&size=" + size).then(function(r) {
+      if (!r.ok) throw new Error("fetch history failed");
+      return r.json();
+    });
+  }
+
+  function CheckinPage() {
+    var _todayChecked = useState(false), todayChecked = _todayChecked[0], setTodayChecked = _todayChecked[1];
+    var _todayRecord = useState(null), todayRecord = _todayRecord[0], setTodayRecord = _todayRecord[1];
+    var _checking = useState(false), checking = _checking[0], setChecking = _checking[1];
+
+    var _history = useState([]), history = _history[0], setHistory = _history[1];
+    var _total = useState(0), total = _total[0], setTotal = _total[1];
+    var _page = useState(1), page = _page[0], setPage = _page[1];
+    var _size = useState(20), size = _size[0], setSize = _size[1];
+    var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+
+    var _totalDays = useState(0), totalDays = _totalDays[0], setTotalDays = _totalDays[1];
+    var _streak = useState(0), streak = _streak[0], setStreak = _streak[1];
+
+    // Check today
+    useEffect(function() {
+      checkToday().then(function(d) {
+        setTodayChecked(d.checked_in);
+        setTodayRecord(d.record);
+      }).catch(function(){});
+    }, []);
+
+    // Load history
+    var loadHistory = useCallback(function() {
+      setLoading(true);
+      fetchHistory(page, size).then(function(d) {
+        var items = d.items || [];
+        setHistory(items);
+        setTotal(d.total || 0);
+        if (page === 1 && items.length > 0) {
+          setTotalDays(d.total || 0);
+          setStreak(items[0].consecutive_days || 0);
+        }
+      }).catch(function(){}).finally(function() { setLoading(false); });
+    }, [page, size]);
+    useEffect(function() { loadHistory(); }, [loadHistory]);
+
+    function handleCheckin() {
+      setChecking(true);
+      doCheckin().then(function(result) {
+        if (result.already) {
+          a.message.info("今日已签到");
+        } else {
+          var r = result.record;
+          a.message.success("签到成功！连续 " + r.consecutive_days + " 天，获得 " + r.points_earned + " 积分");
+          setTodayChecked(true);
+          setTodayRecord(r);
+          setStreak(r.consecutive_days);
+          setTotalDays(totalDays + 1);
+          loadHistory();
+        }
+      }).catch(function(err) {
+        a.message.error("签到失败: " + (err.message || String(err)));
+      }).finally(function() { setChecking(false); });
+    }
+
+    function formatDate(v) {
+      if (!v) return "";
+      return new Date(v).toLocaleDateString();
+    }
+    function formatDateTime(v) {
+      if (!v) return "";
+      var d = new Date(v);
+      return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour12: false });
+    }
+
+    var columns = [
+      { title: "签到日期", dataIndex: "date", width: 140, render: formatDate },
+      {
+        title: "获得积分", dataIndex: "points_earned", width: 120,
+        render: function(v) { return e(a.Typography.Text, { style: { color: "#52c41a" } }, "+" + v); }
+      },
+      {
+        title: "连续天数", dataIndex: "consecutive_days", width: 120,
+        render: function(v) {
+          var color = v >= 7 ? "orange" : v >= 3 ? "blue" : "default";
+          return e(a.Tag, { color: color }, v + " 天");
+        }
+      },
+      { title: "签到时间", dataIndex: "created_at", render: formatDateTime },
+    ];
+
+    return e("div", { style: { padding: 24 } },
+      e(a.Card, {
+        title: e(a.Typography.Text, { strong: true, style: { fontSize: 18 } }, "签到"),
+        extra: e(a.Button, {
+          type: "primary", size: "large", loading: checking, disabled: todayChecked, onClick: handleCheckin
+        }, todayChecked ? "✓ 今日已签到" : "✋ 立即签到"),
+        bodyStyle: { paddingTop: 16 }
+      },
+        // Stats
+        e(a.Row, { gutter: 24, style: { marginBottom: 24 } },
+          e(a.Col, { span: 8 }, e(a.Card, { size: "small", style: { textAlign: "center" } },
+            e(a.Statistic, {
+              title: "今日状态",
+              value: todayChecked ? "已签到" : "未签到",
+              valueStyle: { color: todayChecked ? "#52c41a" : "#faad14" }
+            })
+          )),
+          e(a.Col, { span: 8 }, e(a.Card, { size: "small", style: { textAlign: "center" } },
+            e(a.Statistic, {
+              title: "连续签到", value: streak, suffix: "天",
+              valueStyle: { color: streak >= 7 ? "#ff4d4f" : "#1890ff" }
+            })
+          )),
+          e(a.Col, { span: 8 }, e(a.Card, { size: "small", style: { textAlign: "center" } },
+            e(a.Statistic, { title: "累计签到", value: totalDays, suffix: "天" })
+          ))
+        ),
+        // Today's detail
+        todayRecord ? e(a.Card, {
+          size: "small",
+          style: { marginBottom: 24, background: "#f6ffed", borderColor: "#b7eb8f" }
+        },
+          e(a.Row, { gutter: 16 },
+            e(a.Col, { span: 8 },
+              e(a.Typography.Text, { type: "secondary" }, "今日积分: "),
+              e(a.Typography.Text, { strong: true, style: { color: "#52c41a" } }, "+" + todayRecord.points_earned)
+            ),
+            e(a.Col, { span: 8 },
+              e(a.Typography.Text, { type: "secondary" }, "连续天数: "),
+              e(a.Typography.Text, { strong: true }, todayRecord.consecutive_days + " 天")
+            ),
+            e(a.Col, { span: 8 },
+              e(a.Typography.Text, { type: "secondary" }, "签到时间: "),
+              e(a.Typography.Text, null, new Date(todayRecord.created_at).toLocaleTimeString([], { hour12: false }))
+            )
+          )
+        ) : null,
+        // History
+        e(a.Typography.Text, { strong: true, style: { fontSize: 15, marginBottom: 12, display: "block" } }, "签到记录"),
+        e(a.Table, {
+          dataSource: history, columns: columns, rowKey: "date", loading: loading, size: "middle",
+          pagination: {
+            current: page, pageSize: size, total: total,
+            showSizeChanger: true, pageSizeOptions: ["10", "20", "50"],
+            showTotal: function(t) { return "共 " + t + " 条"; },
+            onChange: function(p, s) { setPage(p); setSize(s); }
+          }
+        })
+      )
+    );
+  }
+
+  var root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(e(CheckinPage));
+})();
+</script>
+</body>
+</html>

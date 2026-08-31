@@ -1,0 +1,21 @@
+{
+  "id": "oauth2-sso",
+  "name": "OAuth2 SSO",
+  "version": "1.0.0",
+  "description": "OAuth2 单点登录插件，支持 GitHub / Google / 自定义 Provider",
+  "description_i18n": {
+    "zh-CN": "OAuth2 单点登录插件，支持 GitHub / Google / 自定义 Provider",
+    "en-US": "OAuth2 single sign-on plugin, supporting GitHub / Google / custom providers"
+  },
+  "author": "QwenPaw User",
+  "type": "general",
+  "entry": {
+    "backend": "backend/plugin.py"
+  },
+  "dependencies": ["httpx>=0.27.0", "fastapi>=0.110"],
+  "qwenpaw_version": {
+    "min": "1.0.0",
+    "max": "2.1.0"
+  },
+  "meta": {}
+}
