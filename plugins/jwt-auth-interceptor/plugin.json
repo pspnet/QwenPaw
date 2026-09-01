@@ -1,0 +1,21 @@
+{
+  "id": "jwt-auth-interceptor",
+  "name": "JWT Auth Interceptor",
+  "version": "1.0.0",
+  "description": "Intercepts outgoing HTTP requests to a specific external service (configured via OMATE_REMOTE_SERVICE_URL) and injects an Authorization: Bearer header using OMATE_USER_TOKEN. Does NOT intercept LLM API calls.",
+  "description_i18n": {
+    "zh-CN": "拦截发往指定外部服务（通过 OMATE_REMOTE_SERVICE_URL 配置）的 HTTP 请求，注入 Authorization: Bearer 认证头（值来自 OMATE_USER_TOKEN）。不拦截 LLM API 调用。",
+    "en-US": "Intercepts outgoing HTTP requests to a specific external service (configured via OMATE_REMOTE_SERVICE_URL) and injects an Authorization: Bearer header using OMATE_USER_TOKEN. Does NOT intercept LLM API calls."
+  },
+  "author": "Qoder",
+  "type": "general",
+  "entry": {
+    "backend": "backend/plugin.py"
+  },
+  "dependencies": [],
+  "qwenpaw_version": {
+    "min": "1.0.0",
+    "max": "2.1.0"
+  },
+  "meta": {}
+}
