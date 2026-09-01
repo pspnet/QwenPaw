@@ -33,8 +33,6 @@ Usage
     GET /api/oauth/status    → check configuration status
 """
 
-import base64
-import json
 import logging
 import os
 import secrets
@@ -192,58 +190,6 @@ def _html_page(
 </html>"""
 
 
-def _safe_parse_json(resp, context: str) -> Optional[Dict[str, Any]]:
-    """Safely parse a JSON response, returning None on failure."""
-    import json
-
-    content_type = resp.headers.get("content-type", "")
-    body = resp.text
-
-    if not body or not body.strip():
-        logger.error(
-            "OAuth2 SSO: %s returned empty response (status=%d, content-type=%s)",
-            context, resp.status_code, content_type,
-        )
-        return None
-
-    if "json" not in content_type.lower():
-        logger.error(
-            "OAuth2 SSO: %s returned non-JSON response (status=%d, content-type=%s, body=%.500s)",
-            context, resp.status_code, content_type, body,
-        )
-        return None
-
-    try:
-        return resp.json()
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.error(
-            "OAuth2 SSO: failed to parse %s JSON (status=%d, body=%.500s): %s",
-            context, resp.status_code, body, exc,
-        )
-        return None
-
-
-def _decode_jwt_claims(token: str) -> Dict[str, Any]:
-    """Decode JWT payload claims without signature verification.
-
-    The token was just received from the trusted token endpoint in the same
-    request, so we trust its contents. This avoids the need to call the
-    /userinfo endpoint which may not accept Bearer tokens in all deployments.
-    """
-    try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return {}
-        # Decode the payload (second part), handling base64url padding
-        payload = parts[1]
-        payload += "=" * (4 - len(payload) % 4)
-        decoded = base64.urlsafe_b64decode(payload)
-        return json.loads(decoded)
-    except Exception as exc:
-        logger.warning("OAuth2 SSO: failed to decode JWT claims: %s", exc)
-        return {}
-
-
 # ── Router ────────────────────────────────────────────────────────────────
 
 
@@ -331,7 +277,6 @@ def _build_router() -> APIRouter:
                     redirect_uri = f"{base}/api/oauth/callback"
                     
                 token_payload = {
-                    "grant_type": "authorization_code",
                     "client_id": cfg["client_id"],
                     "client_secret": cfg["client_secret"],
                     "code": code,
@@ -344,36 +289,7 @@ def _build_router() -> APIRouter:
                     data=token_payload,
                     headers=token_headers,
                 )
-
-                # Check token response status
-                if token_resp.status_code != 200:
-                    body_preview = (token_resp.text or "")[:500]
-                    logger.error(
-                        "OAuth2 SSO: token endpoint returned status %d, body: %s",
-                        token_resp.status_code, body_preview,
-                    )
-                    return HTMLResponse(
-                        _html_page(
-                            "获取 Token 失败",
-                            f"认证服务返回 HTTP {token_resp.status_code}: <code>{body_preview}</code>",
-                            status="error",
-                        ),
-                        status_code=502,
-                    )
-
-                # Safely parse token response JSON
-                token_json = _safe_parse_json(token_resp, "token response")
-                if token_json is None:
-                    body_preview = (token_resp.text or "")[:500]
-                    return HTMLResponse(
-                        _html_page(
-                            "获取 Token 失败",
-                            f"无法解析认证服务响应 (HTTP {token_resp.status_code}): "
-                            f"<code>{body_preview}</code>",
-                            status="error",
-                        ),
-                        status_code=502,
-                    )
+                token_json = token_resp.json()
 
                 access_token = token_json.get("access_token")
                 if not access_token:
@@ -384,40 +300,16 @@ def _build_router() -> APIRouter:
                         status_code=500,
                     )
 
-                # ── Step 2: extract user info from JWT tokens ──
-                # Spring Authorization Server (OIDC) returns id_token + access_token,
-                # both are JWTs containing user claims. Decode them directly instead
-                # of calling /userinfo (which may not accept Bearer tokens in all
-                # deployments).
-                id_token = token_json.get("id_token", "")
-                userinfo = {}
-
-                # Prefer id_token (richer claims), fall back to access_token
-                for jwt_token in (id_token, access_token):
-                    if jwt_token:
-                        claims = _decode_jwt_claims(jwt_token)
-                        if claims:
-                            userinfo = claims
-                            break
-
-                # Last resort: try /userinfo endpoint if JWT decode yielded nothing
-                if not userinfo:
-                    logger.info("OAuth2 SSO: JWT decode empty, falling back to /userinfo endpoint")
-                    userinfo_headers = {
-                        "Authorization": f"Bearer {access_token}",
-                        "Accept": "application/json",
-                    }
-                    userinfo_resp = await client.get(
-                        cfg["userinfo_url"],
-                        headers=userinfo_headers,
-                    )
-                    if userinfo_resp.status_code == 200:
-                        userinfo = _safe_parse_json(userinfo_resp, "userinfo response") or {}
-                    else:
-                        logger.warning(
-                            "OAuth2 SSO: /userinfo returned %d, body: %.200s",
-                            userinfo_resp.status_code, userinfo_resp.text,
-                        )
+                # ── Step 2: fetch user info ──
+                userinfo_headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/json",
+                }
+                userinfo_resp = await client.get(
+                    cfg["userinfo_url"],
+                    headers=userinfo_headers,
+                )
+                userinfo = userinfo_resp.json()
 
             logger.debug("OAuth2 SSO: userinfo = %s", userinfo)
 
@@ -539,215 +431,8 @@ def _build_router() -> APIRouter:
                 "login": "/api/oauth/login",
                 "callback": "/api/oauth/callback",
                 "status": "/api/oauth/status",
-                "check_session": "/api/oauth/check-session",
             },
         }
-
-    @router.get("/check-session")
-    async def check_session(request: Request):
-        """Auto-login if user has a valid access_token cookie from the OAuth server.
-
-        The OAuth server sets an httpOnly 'access_token' cookie on the shared
-        domain (.claw.raffles.local) when the user logs in via the main platform.
-        This endpoint validates that cookie via the OAuth introspect endpoint
-        and issues a qwenpaw JWT if valid — enabling seamless SSO.
-        """
-        cfg = _get_config()
-
-        # Extract access_token cookie
-        access_token = request.cookies.get("access_token")
-        if not access_token:
-            return {"authenticated": False, "reason": "no access_token cookie"}
-
-        import httpx
-
-        # Derive introspect URL from token_url: /oauth2/token → /oauth2/introspect
-        token_url = cfg["token_url"]
-        introspect_url = token_url.rsplit("/", 1)[0] + "/introspect"
-
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    introspect_url,
-                    headers={"Authorization": f"Bearer {access_token}"},
-                )
-
-                if resp.status_code != 200:
-                    logger.debug(
-                        "OAuth2 SSO: introspect returned %d for session check",
-                        resp.status_code,
-                    )
-                    return {"authenticated": False, "reason": "token invalid or expired"}
-
-                body = resp.json()
-                if not body.get("active"):
-                    return {"authenticated": False, "reason": "token not active"}
-
-                username = body.get("sub", "")
-                if not username:
-                    return {"authenticated": False, "reason": "no subject in token"}
-
-        except Exception as exc:
-            logger.warning("OAuth2 SSO: introspect call failed: %s", exc)
-            return {"authenticated": False, "reason": f"introspect error: {exc}"}
-
-        # Token is valid — create qwenpaw JWT
-        try:
-            from qwenpaw.app.auth import (
-                create_token,
-                has_registered_users,
-                register_user,
-            )
-
-            if not has_registered_users():
-                random_pw = secrets.token_hex(32)
-                token = register_user(username, random_pw)
-                if not token:
-                    token = create_token(username)
-            else:
-                token = create_token(username)
-
-            if not token:
-                return {"authenticated": False, "reason": "failed to create qwenpaw token"}
-
-        except Exception as exc:
-            logger.error("OAuth2 SSO: qwenpaw auth failed: %s", exc)
-            return {"authenticated": False, "reason": f"auth error: {exc}"}
-
-        # Set env vars for other plugins
-        os.environ["OMATE_USER_CODE"] = username
-        os.environ["OMATE_USER_NAME"] = username
-        logger.info("OAuth2 SSO: auto-login via session cookie for '%s'", username)
-
-        return {
-            "authenticated": True,
-            "username": username,
-            "token": token,
-        }
-
-    @router.get("/auto-login")
-    async def auto_login(request: Request):
-        """Browser-based auto-login page.
-
-        Visiting this URL checks for a valid access_token cookie from the
-        OAuth server. If valid, it sets the qwenpaw auth token in localStorage
-        and redirects to the home page. Otherwise, redirects to the normal
-        login page.
-        """
-        cfg = _get_config()
-
-        access_token = request.cookies.get("access_token")
-        if not access_token:
-            return HTMLResponse(
-                _html_page(
-                    "自动登录",
-                    "未检测到登录会话，正在跳转到登录页…",
-                    redirect=True,
-                    status="wait",
-                )
-                + "<script>setTimeout(function(){ window.location.href='/'; }, 1500);</script>",
-            )
-
-        import httpx
-
-        token_url = cfg["token_url"]
-        introspect_url = token_url.rsplit("/", 1)[0] + "/introspect"
-
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    introspect_url,
-                    headers={"Authorization": f"Bearer {access_token}"},
-                )
-
-                if resp.status_code != 200:
-                    return HTMLResponse(
-                        _html_page(
-                            "自动登录失败",
-                            "登录会话已过期，正在跳转到登录页…",
-                            redirect=True,
-                            status="error",
-                        )
-                        + "<script>setTimeout(function(){ window.location.href='/'; }, 1500);</script>",
-                    )
-
-                body = resp.json()
-                if not body.get("active"):
-                    return HTMLResponse(
-                        _html_page(
-                            "自动登录失败",
-                            "登录会话无效，正在跳转到登录页…",
-                            redirect=True,
-                            status="error",
-                        )
-                        + "<script>setTimeout(function(){ window.location.href='/'; }, 1500);</script>",
-                    )
-
-                username = body.get("sub", "")
-                if not username:
-                    return HTMLResponse(
-                        _html_page(
-                            "自动登录失败",
-                            "无法识别用户身份，正在跳转到登录页…",
-                            redirect=True,
-                            status="error",
-                        )
-                        + "<script>setTimeout(function(){ window.location.href='/'; }, 1500);</script>",
-                    )
-
-        except Exception as exc:
-            logger.warning("OAuth2 SSO: auto-login introspect failed: %s", exc)
-            return HTMLResponse(
-                _html_page(
-                    "自动登录失败",
-                    f"无法验证登录会话: {exc}",
-                    redirect=True,
-                    status="error",
-                )
-                + "<script>setTimeout(function(){ window.location.href='/'; }, 1500);</script>",
-            )
-
-        # Create qwenpaw JWT
-        try:
-            from qwenpaw.app.auth import (
-                create_token,
-                has_registered_users,
-                register_user,
-            )
-
-            if not has_registered_users():
-                random_pw = secrets.token_hex(32)
-                token = register_user(username, random_pw)
-                if not token:
-                    token = create_token(username)
-            else:
-                token = create_token(username)
-
-            if not token:
-                return HTMLResponse(
-                    _html_page("Token 创建失败", "无法生成认证 Token", status="error"),
-                    status_code=500,
-                )
-        except Exception as exc:
-            logger.error("OAuth2 SSO: auto-login qwenpaw auth failed: %s", exc)
-            return HTMLResponse(
-                _html_page("认证失败", f"生成 Token 失败: {exc}", status="error"),
-                status_code=500,
-            )
-
-        os.environ["OMATE_USER_CODE"] = username
-        os.environ["OMATE_USER_NAME"] = username
-        logger.info("OAuth2 SSO: auto-login successful for '%s'", username)
-
-        return HTMLResponse(
-            _html_page(
-                "自动登录成功",
-                f"欢迎 <b>{username}</b>，正在跳转…",
-                token=token,
-                redirect=True,
-                status="ok",
-            ),
-        )
 
     return router
 
