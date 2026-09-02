@@ -1,44 +1,37 @@
 # -*- coding: utf-8 -*-
-"""JWT Auth Interceptor Plugin.
+"""JWT Auth Interceptor + a-console API Client Plugin.
 
-Intercepts outgoing HTTP requests to a **specific external service**
-(e.g. ``http://10.0.0.1:8080``) and injects an
-``Authorization: Bearer <token>`` header using the JWT from the
-``OMATE_USER_TOKEN`` environment variable.
+Two-in-one plugin:
 
-LLM API calls (OpenAI, Anthropic, Gemini, ...) are **NOT** intercepted.
-Only requests whose URL starts with one of the configured target
-prefixes are modified.
+1. **HTTP Interceptor** — monkey-patches ``httpx.AsyncClient.send`` and
+   ``httpx.Client.send`` so every outgoing request targeting the
+   ``OMATE_CONSOLE_URL`` automatically carries
+   ``Authorization: Bearer <OMATE_USER_TOKEN>``.
 
-How it works
-------------
-On startup the plugin monkey-patches ``httpx.AsyncClient.send`` and
-``httpx.Client.send``.  Every outgoing httpx request is inspected: if
-its URL matches a configured target prefix, the JWT bearer token is
-added to the request headers before the original ``send`` proceeds.
-
-On uninstall the original ``send`` methods are restored.
+2. **a-console API Client** — provides :func:`get_console_client` for
+   other plugins to call a-console admin APIs with structured methods
+   and automatic token refresh.
 
 Environment variables
 ---------------------
 OMATE_USER_TOKEN : JWT to include as ``Authorization: Bearer`` value.
-    If unset or empty, the plugin logs a warning and does **not**
-    patch anything.
+    Always present.
 
-OMATE_REMOTE_SERVICE_URL : Target service URL(s) to intercept.
+OMATE_CONSOLE_URL : Target service URL(s) to intercept.
     Comma-separated list of URL prefixes.  A request is intercepted
     only when its full URL starts with one of these prefixes.
 
-    Example::
+Usage from other plugins
+------------------------
+::
 
-        OMATE_REMOTE_SERVICE_URL=http://10.0.0.1:8080
+    from jwt_auth_interceptor.backend.console_client import (
+        get_console_client,
+    )
 
-    or::
-
-        OMATE_REMOTE_SERVICE_URL=http://10.0.0.1:8080,http://10.0.0.2:9090
-
-    If unset or empty, the plugin logs a warning and does not intercept
-    any request.
+    client = get_console_client()
+    me = await client.me()
+    servers = await client.list_mcp_servers()
 """
 
 import logging
@@ -46,6 +39,8 @@ import os
 from typing import List
 
 from qwenpaw.plugins.api import PluginApi
+
+from .console_client import get_console_client, reset_console_client
 
 logger = logging.getLogger("qwenpaw.jwt_auth_interceptor")
 
@@ -83,6 +78,7 @@ def _make_async_send_wrapper(original_send, prefixes: List[str]):
     async def _patched_async_send(self, request, **kwargs):
         url_str = str(request.url)
         if _url_matches(url_str, prefixes):
+            # Read the latest token (may have been refreshed by the client)
             token = os.environ.get("OMATE_USER_TOKEN", "").strip()
             if token and "Authorization" not in request.headers:
                 request.headers["Authorization"] = f"Bearer {token}"
@@ -111,8 +107,12 @@ def _make_sync_send_wrapper(original_send, prefixes: List[str]):
 
 
 class JWTAuthInterceptorPlugin:
-    """JWT Auth Interceptor — injects OMATE_USER_TOKEN into requests
-    targeting a specific external service, identified by URL prefix."""
+    """JWT Auth Interceptor + a-console API Client.
+
+    Intercepts httpx requests targeting a-console and injects the JWT
+    Bearer token.  Also provides a structured API client for other
+    plugins to call a-console admin endpoints directly.
+    """
 
     def register(self, api: PluginApi) -> None:
         api.register_startup_hook(
@@ -130,7 +130,7 @@ class JWTAuthInterceptorPlugin:
     # ── Startup ──────────────────────────────────────────────────────
 
     async def _on_startup(self) -> None:
-        """Patch httpx send methods to inject JWT for target URLs."""
+        """Patch httpx send methods and initialize a-console client."""
         global _original_async_send, _original_sync_send
 
         token = os.environ.get("OMATE_USER_TOKEN", "").strip()
@@ -141,11 +141,11 @@ class JWTAuthInterceptorPlugin:
             )
             return
 
-        raw_url = os.environ.get("OMATE_REMOTE_SERVICE_URL", "").strip()
+        raw_url = os.environ.get("OMATE_CONSOLE_URL", "").strip()
         prefixes = _normalize_prefixes(raw_url)
         if not prefixes:
             logger.warning(
-                "JWT Auth Interceptor: OMATE_REMOTE_SERVICE_URL is not "
+                "JWT Auth Interceptor: OMATE_CONSOLE_URL is not "
                 "set; no requests will be intercepted. Set it to the "
                 "target service URL (e.g. http://10.0.0.1:8080)",
             )
@@ -172,6 +172,14 @@ class JWTAuthInterceptorPlugin:
             prefixes,
         )
 
+        # Initialize a-console client singleton
+        client = get_console_client()
+        if client.has_credentials:
+            logger.info(
+                "Console client initialized for %s",
+                client.base_url,
+            )
+
     # ── Uninstall ────────────────────────────────────────────────────
 
     async def _on_uninstall(
@@ -180,7 +188,7 @@ class JWTAuthInterceptorPlugin:
         plugin_id: str = "",
         delete_files: bool = False,
     ) -> None:
-        """Restore original httpx send methods."""
+        """Restore original httpx send methods and reset client."""
         global _original_async_send, _original_sync_send
 
         import httpx
@@ -198,6 +206,9 @@ class JWTAuthInterceptorPlugin:
             logger.info(
                 "JWT Auth Interceptor: restored httpx.Client.send",
             )
+
+        reset_console_client()
+        logger.info("Console client reset")
 
 
 # ── Module-level plugin entry point ──────────────────────────────────────

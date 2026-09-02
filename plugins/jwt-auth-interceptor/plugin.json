@@ -1,11 +1,11 @@
 {
   "id": "jwt-auth-interceptor",
   "name": "JWT Auth Interceptor",
-  "version": "1.0.0",
-  "description": "Intercepts outgoing HTTP requests to a specific external service (configured via OMATE_REMOTE_SERVICE_URL) and injects an Authorization: Bearer header using OMATE_USER_TOKEN. Does NOT intercept LLM API calls.",
+  "version": "2.0.0",
+  "description": "Intercepts outgoing HTTP requests to a-console (OMATE_CONSOLE_URL), injects Authorization: Bearer header, and provides a structured a-console API client with auto-login for other plugins.",
   "description_i18n": {
-    "zh-CN": "拦截发往指定外部服务（通过 OMATE_REMOTE_SERVICE_URL 配置）的 HTTP 请求，注入 Authorization: Bearer 认证头（值来自 OMATE_USER_TOKEN）。不拦截 LLM API 调用。",
-    "en-US": "Intercepts outgoing HTTP requests to a specific external service (configured via OMATE_REMOTE_SERVICE_URL) and injects an Authorization: Bearer header using OMATE_USER_TOKEN. Does NOT intercept LLM API calls."
+    "zh-CN": "拦截发往 a-console（OMATE_CONSOLE_URL）的 HTTP 请求并注入 JWT 认证头；同时提供结构化的 a-console API 客户端（支持自动登录），供其他插件直接调用。",
+    "en-US": "Intercepts outgoing HTTP requests to a-console (OMATE_CONSOLE_URL), injects Authorization: Bearer header, and provides a structured a-console API client with auto-login for other plugins."
   },
   "author": "Qoder",
   "type": "general",
@@ -16,6 +16,10 @@
   "qwenpaw_version": {
     "min": "1.0.0",
     "max": "2.1.0"
+  },
+  "env": {
+    "OMATE_CONSOLE_URL": "a-console base URL (e.g. http://localhost:8080). Required.",
+    "OMATE_USER_TOKEN": "JWT token for Authorization header. Required."
   },
   "meta": {}
 }

@@ -27,8 +27,7 @@ def _get_remote_config() -> Dict[str, str]:
     """Read remote connection config from environment variables."""
     return {
         "base_url": os.environ.get("OMATE_CONSOLE_URL", "").strip().rstrip("/"),
-        "token": os.environ.get("OMATE_CONSOLE_TOKEN", "").strip(),
-        "member_id": os.environ.get("OMATE_REFERRAL_MEMBER_ID", "").strip(),
+        "token": os.environ.get("OMATE_USER_TOKEN", "").strip(),
     }
 
 
@@ -79,11 +78,11 @@ def build_router() -> APIRouter:
     async def get_me() -> Dict[str, Any]:
         """Get current member info including referral code."""
         cfg = _get_remote_config()
-        if not cfg["base_url"] or not cfg["member_id"]:
-            raise HTTPException(status_code=400, detail="Set OMATE_CONSOLE_URL and OMATE_REFERRAL_MEMBER_ID")
+        if not cfg["base_url"]:
+            raise HTTPException(status_code=400, detail="Set OMATE_CONSOLE_URL")
 
         try:
-            data = await _remote_get(cfg, f"/admin/v1/members/{cfg['member_id']}")
+            data = await _remote_get(cfg, "/admin/v1/members/me")
             member = data.get("member", {})
             referral_count = data.get("referral_count", 0)
             return {
@@ -99,13 +98,13 @@ def build_router() -> APIRouter:
     async def list_records(page: int = 1, size: int = 20) -> Dict[str, Any]:
         """List referral records where current member is the referrer."""
         cfg = _get_remote_config()
-        if not cfg["base_url"] or not cfg["member_id"]:
-            raise HTTPException(status_code=400, detail="Set OMATE_CONSOLE_URL and OMATE_REFERRAL_MEMBER_ID")
+        if not cfg["base_url"]:
+            raise HTTPException(status_code=400, detail="Set OMATE_CONSOLE_URL")
 
         try:
             data = await _remote_get(
                 cfg, "/admin/v1/referral-records",
-                params={"member_id": cfg["member_id"], "page": page, "size": size},
+                params={"page": page, "size": size},
             )
             return data
         except Exception as e:
@@ -116,14 +115,14 @@ def build_router() -> APIRouter:
     async def get_rewards() -> Dict[str, Any]:
         """Get total referral rewards for current member."""
         cfg = _get_remote_config()
-        if not cfg["base_url"] or not cfg["member_id"]:
-            raise HTTPException(status_code=400, detail="Set OMATE_CONSOLE_URL and OMATE_REFERRAL_MEMBER_ID")
+        if not cfg["base_url"]:
+            raise HTTPException(status_code=400, detail="Set OMATE_CONSOLE_URL")
 
         try:
             # Fetch all records to calculate total (simple approach)
             data = await _remote_get(
                 cfg, "/admin/v1/referral-records",
-                params={"member_id": cfg["member_id"], "page": 1, "size": 1000},
+                params={"page": 1, "size": 1000},
             )
             items = data.get("items") or []
             total_count = data.get("total", 0)

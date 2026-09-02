@@ -47,13 +47,7 @@ def _get_interval() -> int:
     return int(os.environ.get("OMATE_MEMORY_SYNC_INTERVAL", "300"))
 
 def _get_token() -> str:
-    return os.environ.get("OMATE_CONSOLE_TOKEN", "")
-
-def _get_user_code() -> str:
-    return os.environ.get("OMATE_USER_CODE", "")
-
-def _get_user_name() -> str:
-    return os.environ.get("OMATE_USER_NAME", "")
+    return os.environ.get("OMATE_USER_TOKEN", "")
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +257,6 @@ def _save_conflict_backup(category: str, workspace: Path, local_content: str) ->
 # ---------------------------------------------------------------------------
 
 def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
-               user_code: str, user_name: str,
                workspace: Path) -> Dict[str, int]:
     """Perform one round of bidirectional sync.
 
@@ -273,6 +266,7 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
 
     stats = {"pushed": 0, "pulled": 0, "conflicts": 0, "errors": 0}
     state = _load_sync_state(workspace)
+    dirty = False  # only write state file when something changed
 
     all_categories = list(CATEGORY_SYNC_DIRECTION.keys())
 
@@ -281,7 +275,7 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
     try:
         resp = client.get(
             remote_url,
-            params={"userId": user_code, "page": 1, "size": 100},
+            params={"page": 1, "size": 100},
             headers=headers,
             timeout=15.0,
         )
@@ -294,6 +288,16 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
         logger.warning("Failed to fetch remote memories: %s", exc)
         stats["errors"] += 1
         return stats
+
+    # ── Step 1b: Detect stale remote_ids (endpoint changed / data deleted) ──
+    for category in all_categories:
+        local_state = state.get(category, {})
+        stale_id = local_state.get("remote_id", "")
+        if stale_id and category not in remote_map:
+            # State has a remote_id but it's gone from remote — likely endpoint changed
+            logger.info("Stale remote_id for %s (not on remote), will re-push", category)
+            state[category] = {}
+            dirty = True
 
     # ── Step 2: Pull remote changes (remote -> local) ──────────────────
     # Only pull for bidirectional categories
@@ -324,6 +328,7 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
                 "version": remote_version,
                 "local_hash": _content_hash(remote_content),
             }
+            dirty = True
             stats["pulled"] += 1
             logger.info("Pulled %s: remote v%d -> local", category, remote_version)
         elif remote_version > known_version and local_hash != known_hash:
@@ -336,6 +341,7 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
                 "version": remote_version,
                 "local_hash": _content_hash(remote_content),
             }
+            dirty = True
             stats["conflicts"] += 1
 
     # ── Step 3: Push local changes (local -> remote) ──────────────────
@@ -357,7 +363,6 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
         sync_direction = CATEGORY_SYNC_DIRECTION[category]
 
         body: Dict[str, Any] = {
-            "userId": user_code,
             "title": category,
             "content": local_content,
             "category": category,
@@ -386,6 +391,7 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
                     )
                     state[category]["version"] = current_version
                     state[category]["local_hash"] = ""
+                    dirty = True
                     stats["conflicts"] += 1
                     continue
                 resp.raise_for_status()
@@ -395,6 +401,7 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
                     "version": updated.get("version", known_version + 1),
                     "local_hash": local_hash,
                 }
+                dirty = True
                 stats["pushed"] += 1
                 logger.info("Pushed %s: v%d -> remote", category, known_version)
             except httpx.HTTPStatusError as exc:
@@ -421,6 +428,7 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
                     "version": updated.get("version", 2),
                     "local_hash": local_hash,
                 }
+                dirty = True
                 stats["pushed"] += 1
             except Exception as exc:
                 logger.warning("Push (adopt) failed for %s: %s", category, exc)
@@ -441,13 +449,15 @@ def _sync_once(client: Any, headers: Dict[str, str], remote_url: str,
                     "version": created.get("version", 1),
                     "local_hash": local_hash,
                 }
+                dirty = True
                 stats["pushed"] += 1
                 logger.info("Created %s on remote", category)
             except Exception as exc:
                 logger.warning("Create failed for %s: %s", category, exc)
                 stats["errors"] += 1
 
-    _save_sync_state(workspace, state)
+    if dirty:
+        _save_sync_state(workspace, state)
     return stats
 
 
@@ -456,19 +466,18 @@ def _sync_loop() -> None:
 
     while True:
         try:
-            user_code = _get_user_code()
-            user_name = _get_user_name()
             remote_url = _get_remote_url()
             token = _get_token()
 
-            if not user_code:
-                logger.warning("Memory sync skipped: OMATE_USER_CODE is empty")
+            if not token:
+                logger.warning("Memory sync skipped: OMATE_USER_TOKEN is empty")
                 time.sleep(_get_interval())
                 continue
 
-            headers: Dict[str, str] = {"Content-Type": "application/json"}
-            if token:
-                headers["X-API-Key"] = token
+            headers: Dict[str, str] = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            }
 
             workspace = _resolve_workspace_dir()
 
@@ -476,12 +485,11 @@ def _sync_loop() -> None:
                 with httpx.Client() as client:
                     stats = _sync_once(
                         client, headers, remote_url,
-                        user_code, user_name, workspace,
+                        workspace,
                     )
                     if stats["pushed"] or stats["pulled"] or stats["conflicts"]:
                         logger.info(
-                            "Memory sync OK: user=%s(%s), pushed=%d pulled=%d conflicts=%d errors=%d",
-                            user_name, user_code,
+                            "Memory sync OK: pushed=%d pulled=%d conflicts=%d errors=%d",
                             stats["pushed"], stats["pulled"],
                             stats["conflicts"], stats["errors"],
                         )
@@ -518,8 +526,6 @@ class MemorySyncReporterPlugin:
                     "mode": "bidirectional",
                     "remote_url": _get_remote_url(),
                     "interval": _get_interval(),
-                    "user_code": _get_user_code(),
-                    "user_name": _get_user_name(),
                     "token_set": bool(_get_token()),
                     "workspace": str(ws),
                     "categories": {
@@ -544,9 +550,7 @@ class MemorySyncReporterPlugin:
         )
         thread.start()
         logger.info(
-            "Memory Sync Reporter started (user=%s, code=%s, interval=%ds, remote=%s)",
-            _get_user_name(),
-            _get_user_code(),
+            "Memory Sync Reporter started (interval=%ds, remote=%s)",
             _get_interval(),
             _get_remote_url(),
         )

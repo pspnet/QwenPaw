@@ -87,14 +87,11 @@ def _get_remote_config() -> Dict[str, str]:
     """Read remote connection config from environment variables."""
     return {
         "base_url": os.environ.get("OMATE_CONSOLE_URL", "").strip().rstrip("/"),
-        "token": os.environ.get("OMATE_CONSOLE_TOKEN", "").strip(),
-        "member_id": os.environ.get("OMATE_USER_CODE", "").strip(),
-        "member_name": os.environ.get("OMATE_USER_NAME", "").strip(),
+        "token": os.environ.get("OMATE_USER_TOKEN", "").strip(),
     }
 
 
 async def _sync_to_remote(
-    member_id: str,
     checkin_date: str,
     points_earned: int,
     consecutive_days: int,
@@ -103,10 +100,11 @@ async def _sync_to_remote(
 
     Calls POST /admin/v1/checkin-records. Returns the remote response
     or None on failure (non-blocking, logged as warning).
+    User identity is extracted from the JWT by the server.
     """
     cfg = _get_remote_config()
-    if not cfg["base_url"] or not member_id:
-        logger.debug("Remote sync skipped: no remote URL or member_id configured")
+    if not cfg["base_url"]:
+        logger.debug("Remote sync skipped: no remote URL configured")
         return None
 
     import httpx
@@ -115,8 +113,6 @@ async def _sync_to_remote(
         headers["Authorization"] = f"Bearer {cfg['token']}"
 
     payload = {
-        "member_id": member_id,
-        "member_name": cfg.get("member_name", ""),
         "checkin_date": checkin_date,
         "points_earned": points_earned,
         "consecutive_days": consecutive_days,
@@ -198,9 +194,7 @@ def build_router() -> APIRouter:
         logger.info("Checkin recorded: %s (day %d, +%d pts)", today_str, consecutive, points)
 
         # Sync to remote a-console (non-blocking)
-        cfg = _get_remote_config()
         remote_result = await _sync_to_remote(
-            member_id=cfg["member_id"],
             checkin_date=today_str,
             points_earned=points,
             consecutive_days=consecutive,

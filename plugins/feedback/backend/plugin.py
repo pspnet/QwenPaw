@@ -35,9 +35,7 @@ class FeedbackCreate(BaseModel):
 def _get_remote_config() -> Dict[str, str]:
     return {
         "base_url": os.environ.get("OMATE_CONSOLE_URL", "").strip().rstrip("/"),
-        "token": os.environ.get("OMATE_CONSOLE_TOKEN", "").strip(),
-        "user_code": os.environ.get("OMATE_USER_CODE", "").strip(),
-        "user_name": os.environ.get("OMATE_USER_NAME", "").strip(),
+        "token": os.environ.get("OMATE_USER_TOKEN", "").strip(),
     }
 
 
@@ -67,8 +65,6 @@ def build_router() -> APIRouter:
             "category": payload.category,
             "priority": payload.priority,
             "status": "open",
-            "user_id": cfg["user_code"],
-            "user_name": cfg["user_name"],
         }
 
         try:

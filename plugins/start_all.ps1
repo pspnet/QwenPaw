@@ -1,23 +1,25 @@
-# a-console 远程服务地址
-$env:OMATE_CONSOLE_URL = "http://localhost:8080"
-$env:OMATE_USER_CODE = "Y014030"
-$env:OMATE_USER_NAME = "于奥成"
+# ============================================================
+# QwenPaw 插件服务启动脚本
+# ============================================================
 
-# 通用 Token (JWT)
-$env:OMATE_CONSOLE_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRfaWQiOiJhZG1pbiIsImFwcF9pZCI6InF3ZW5wYXciLCJhZ2VudF9pZCI6IiIsInJvbGVzIjpbImFkbWluIl0sInNjb3BlcyI6WyJhZG1pbjpyZWFkIiwiYWRtaW46d3JpdGUiXSwic3ViIjoiYWRtaW4iLCJleHAiOjE4MTkyNzYwMDUsImlhdCI6MTc4Nzc0MDAwNX0.L6m-4FhmY5udXZTNFIIdflLWt9hXq5zbRPzFyvaQFNA"
+# --- 配置 ---
+$env:OMATE_CONSOLE_URL          = "http://localhost:8080"
+$env:OMATE_MEMORY_SYNC_INTERVAL = "10"
+$env:UV_LINK_MODE               = "copy"
 
-# Referral (推荐)
-$env:OMATE_REFERRAL_MEMBER_ID = "da73gddi57nmhr7pk160"
+# JWT Token (必须是单行，不能换行)
+$env:OMATE_USER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfYWJjMTIzZGVmNDU2IiwidXNlcm5hbWUiOiJhZG1pbiIsImFsaWFzIjoi566h55CG5ZGYIiwiY29kZSI6IkVNUDAwMSIsIm5pY2tuYW1lIjoiQWRtaW4gVXNlciIsImRlcGFydG1lbnQiOiLmioDmnK_pg6giLCJlbmFibGVkIjp0cnVlLCJyb2xlcyI6WyJhZG1pbiIsInVzZXIiXSwidHlwZSI6ImFjY2Vzc190b2tlbiIsImV4cCI6MjEwMzY2ODMxNiwiaWF0IjoxNzg4MzA4MzE2fQ.KVPsQF-QUpRKrj5h-t6ErtDPTw5RCPksacO_ro6LqzU"
 
-# Memory Sync Reporter (定时记忆同步, 秒)
-$env:OMATE_MEMORY_SYNC_INTERVAL = "6000"
+# --- 路径配置 ---
+$ProjectDir = "E:\workspace\liberty\QwenPaw"
+$PythonPath = "D:\python\312\python.exe"
 
-# OAuth2 SSO (GitHub)
-$env:OMATE_OAUTH2_PROVIDER = "github"
-$env:OMATE_OAUTH2_CLIENT_ID = "Ov23liNBeoGh1Z1GjOUs"
-$env:OMATE_OAUTH2_CLIENT_SECRET = "699b4c85b73ab1ecddd271c7911285087bcf8f82"
-$env:OMATE_OAUTH2_REDIRECT_URI = "http://localhost:8088/api/oauth/callback"
+# --- 启动 ---
+if (-not (Test-Path $ProjectDir)) {
+    Write-Error "项目目录不存在: $ProjectDir"
+    exit 1
+}
 
-$env:UV_LINK_MODE = "copy"
-cd "E:\workspace\github\QwenPaw"
-uv run --python D:\python\312\python.exe qwenpaw app --host 0.0.0.0 --port 8088
+Set-Location $ProjectDir
+Write-Host "Starting QwenPaw on 0.0.0.0:8088 ..." -ForegroundColor Cyan
+uv run --python $PythonPath qwenpaw app --host 0.0.0.0 --port 8088

@@ -97,17 +97,15 @@ uv run --python <python-path> qwenpaw plugin install plugins/checkin --force
 
 | 变量名 | 必填 | 说明 | 示例 |
 |--------|------|------|------|
-| `QWENPAW_CHECKIN_REMOTE_URL` | 否 | 远程 a-console 服务地址，配置后启用远端同步 | `http://localhost:8080` |
-| `QWENPAW_CHECKIN_TOKEN` | 否 | Bearer Token（JWT），用于访问远程 `/admin/v1/` 接口 | `eyJhbGci...` |
-| `OMATE_USER_CODE` | 同步必须 | 用户编号（从系统环境变量获取） | `Y014030` |
-| `OMATE_USER_NAME` | 否 | 用户名（从系统环境变量获取，可选） | `张三` |
+| `OMATE_CONSOLE_URL` | 否 | 远程 a-console 服务地址，配置后启用远端同步 | `http://localhost:8080` |
+| `OMATE_USER_TOKEN` | 同步必须 | Bearer Token（JWT），用户身份自动从 JWT 解析 | `eyJhbGci...` |
 
 ### 设置示例（PowerShell）
 
 ```powershell
-$env:QWENPAW_CHECKIN_REMOTE_URL = "http://localhost:8080"
-$env:QWENPAW_CHECKIN_TOKEN      = "<your-jwt-token>"
-# 用户信息从系统环境变量 OMATE_USER_CODE 和 OMATE_USER_NAME 获取
+$env:OMATE_CONSOLE_URL = "http://localhost:8080"
+$env:OMATE_USER_TOKEN  = "<your-jwt-token>"
+# 用户身份从 JWT 自动解析，无需传递人员参数
 
 uv run --python D:\python\312\python.exe qwenpaw app --port 8088
 ```
